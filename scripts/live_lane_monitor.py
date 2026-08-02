@@ -89,14 +89,21 @@ class LiveLaneMonitor:
         self.transition_progress = 1.0
 
         self._last_logged_controller = None
-        # The overview should behave like a fixed kroki (schematic map), not a
-        # camera that keeps re-centering -- only refit when the path's extent
-        # actually grows beyond what is currently framed (e.g. a real reroute),
-        # not every time the same route is re-published with a new speed
-        # profile. `_view_xlim`/`_view_ylim` are the bounds last fitted to.
-        self._path_view_dirty = False
+        # The whole lanelet is drawn once (base path line + per-zone region
+        # coloring) and left alone after that; only the vehicle marker and
+        # preview highlight move every frame. This flag is set on the first
+        # path, on a genuine reroute (path now reaches outside the
+        # last-drawn bounds), and whenever curve_regions arrives -- not on
+        # every re-publish of the same route with a new speed profile.
+        # `_view_xlim`/`_view_ylim` are the bounds last drawn to.
+        self._path_geometry_dirty = False
         self._view_xlim = None
         self._view_ylim = None
+        # The camera is auto-framed exactly once, on the very first draw.
+        # After that the user has full manual control (matplotlib's
+        # pan/zoom toolbar) and it is never programmatically reset, even if
+        # a reroute later redraws the base path/regions.
+        self._view_fitted_once = False
 
         rospy.Subscriber(
             "/planning/motion_planning/optimized_trajectory", Trajectory, self.trajectory_callback
@@ -132,7 +139,7 @@ class LiveLaneMonitor:
             self.path_y = ys
             self.path_arc_length = cumulative_arc_length(xs, ys)
             if self._path_outgrows_current_view(xs, ys):
-                self._path_view_dirty = True
+                self._path_geometry_dirty = True
 
     def _path_outgrows_current_view(self, path_x, path_y):
         """True on the first path, or if it now reaches outside the last
@@ -168,6 +175,7 @@ class LiveLaneMonitor:
             )
         with self.data_lock:
             self.regions = regions
+            self._path_geometry_dirty = True
 
         print(f"[path_curvature_supervisor] received {len(regions)} curve region(s):")
         for region in regions:
@@ -274,7 +282,7 @@ class LiveLaneMonitor:
             )
             self.region_lines.append(line)
 
-    def _fit_view_to_path(self, path_x, path_y, padding_fraction=0.12):
+    def _fit_view_to_path(self, path_x, path_y, padding_fraction=0.3):
         """Frame the whole path with a comfortable margin, zoomed out enough
         that the entire map is visible rather than tracking the vehicle."""
         if len(path_x) == 0:
@@ -316,11 +324,22 @@ class LiveLaneMonitor:
             controller_changed = self.controller_changed
             transition_progress = self.transition_progress
             regions = list(self.regions)
-            view_dirty = self._path_view_dirty
-            self._path_view_dirty = False
+            geometry_dirty = self._path_geometry_dirty
+            self._path_geometry_dirty = False
 
-        self.line_path_base.set_data(path_x, path_y)
-        self._rebuild_region_lines(path_x, path_y, path_arc_length, regions)
+        if geometry_dirty:
+            # The whole lanelet is (re-)drawn here, once. Everything below
+            # this block runs every frame and only moves the vehicle marker
+            # and preview highlight over this otherwise-static background.
+            self.line_path_base.set_data(path_x, path_y)
+            self._rebuild_region_lines(path_x, path_y, path_arc_length, regions)
+
+            # The camera itself is only auto-framed the very first time --
+            # after that the user drives the view (toolbar pan/zoom) and it
+            # is never reset out from under them, even on a later reroute.
+            if not self._view_fitted_once:
+                self._fit_view_to_path(path_x, path_y)
+                self._view_fitted_once = True
 
         start_index = int(np.searchsorted(path_arc_length, current_arc_length))
         end_index = int(np.searchsorted(path_arc_length, current_arc_length + preview_distance))
@@ -330,9 +349,6 @@ class LiveLaneMonitor:
             path_x[start_index:end_index + 1], path_y[start_index:end_index + 1]
         )
         self.marker_vehicle.set_data([path_x[start_index]], [path_y[start_index]])
-
-        if view_dirty:
-            self._fit_view_to_path(path_x, path_y)
 
         zone_here = self._zone_at(current_arc_length, regions)
         lines = [
@@ -370,7 +386,7 @@ class LiveLaneMonitor:
         ros_thread.start()
 
         anim = FuncAnimation(
-            self.fig, self.update_plot, interval=200, blit=False, cache_frame_data=False
+            self.fig, self.update_plot, interval=100, blit=False, cache_frame_data=False
         )
         plt.show()
         return anim
