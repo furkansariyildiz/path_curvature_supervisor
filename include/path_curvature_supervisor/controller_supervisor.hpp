@@ -40,7 +40,7 @@ public:
   SupervisorOutput update(const PreviewMetrics& metrics, double vehicle_velocity,
                           double current_arc_length, double current_time_seconds);
 
-  // Resets to the initial state (Stanley, no history). Does not affect the
+  // Resets to the initial state (PID, no history). Does not affect the
   // config.
   void reset();
 
@@ -49,8 +49,8 @@ public:
 private:
   const SupervisorConfig& config_;
 
-  ControllerMode current_mode_{ControllerMode::Stanley};
-  ControllerMode previous_mode_{ControllerMode::Stanley};
+  ControllerMode current_mode_{ControllerMode::PID};
+  ControllerMode previous_mode_{ControllerMode::PID};
   bool initialized_{false};
   double last_mode_change_time_{0.0};
 

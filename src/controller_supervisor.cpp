@@ -12,12 +12,14 @@ int ControllerSupervisor::tierOf(ControllerMode mode) noexcept
 {
   switch (mode)
   {
-    case ControllerMode::Stanley:
+    case ControllerMode::PID:
       return 0;
-    case ControllerMode::PurePursuit:
+    case ControllerMode::Stanley:
       return 1;
-    case ControllerMode::MPC:
+    case ControllerMode::PurePursuit:
       return 2;
+    case ControllerMode::MPC:
+      return 3;
   }
   return 0;
 }
@@ -33,7 +35,7 @@ ControllerMode ControllerSupervisor::decideTargetMode(const PreviewMetrics& metr
   // window cannot by itself trigger an escalation. A genuinely high
   // lateral-acceleration situation (high v^2*kappa) can still trigger MPC
   // even if peak curvature alone would not have -- see
-  // README.md "Preview curvature analizi".
+  // README.md "Preview curvature analysis".
   const bool average_confirms_upgrade =
       metrics.average_absolute_curvature >=
       config_.mpc_enter_curvature_threshold * config_.average_curvature_confirmation_ratio;
@@ -50,6 +52,13 @@ ControllerMode ControllerSupervisor::decideTargetMode(const PreviewMetrics& metr
   const bool pure_pursuit_exit =
       metrics.maximum_absolute_curvature < config_.pure_pursuit_exit_curvature_threshold;
 
+  // PID (see ControllerMode) has no cross-track-error correction, so it is
+  // only ever the target on essentially straight path segments.
+  const bool stanley_enter =
+      metrics.maximum_absolute_curvature >= config_.stanley_enter_curvature_threshold;
+  const bool stanley_exit =
+      metrics.maximum_absolute_curvature < config_.stanley_exit_curvature_threshold;
+
   switch (current_mode_)
   {
     case ControllerMode::MPC:
@@ -57,21 +66,48 @@ ControllerMode ControllerSupervisor::decideTargetMode(const PreviewMetrics& metr
       {
         return ControllerMode::MPC;
       }
-      return pure_pursuit_exit ? ControllerMode::Stanley : ControllerMode::PurePursuit;
+      if (!pure_pursuit_exit)
+      {
+        return ControllerMode::PurePursuit;
+      }
+      return stanley_exit ? ControllerMode::PID : ControllerMode::Stanley;
 
     case ControllerMode::PurePursuit:
       if (mpc_enter)
       {
         return ControllerMode::MPC;
       }
-      return pure_pursuit_exit ? ControllerMode::Stanley : ControllerMode::PurePursuit;
+      if (!pure_pursuit_exit)
+      {
+        return ControllerMode::PurePursuit;
+      }
+      return stanley_exit ? ControllerMode::PID : ControllerMode::Stanley;
 
     case ControllerMode::Stanley:
       if (mpc_enter)
       {
         return ControllerMode::MPC;
       }
-      return pure_pursuit_enter ? ControllerMode::PurePursuit : ControllerMode::Stanley;
+      if (pure_pursuit_enter)
+      {
+        return ControllerMode::PurePursuit;
+      }
+      return stanley_exit ? ControllerMode::PID : ControllerMode::Stanley;
+
+    case ControllerMode::PID:
+      // A single preview window can, in principle, already show enough
+      // curvature/lateral-acceleration to justify jumping straight to
+      // Pure Pursuit or MPC (e.g. right after a fresh, more demanding
+      // path is set); it need not step through every tier in order.
+      if (mpc_enter)
+      {
+        return ControllerMode::MPC;
+      }
+      if (pure_pursuit_enter)
+      {
+        return ControllerMode::PurePursuit;
+      }
+      return stanley_enter ? ControllerMode::Stanley : ControllerMode::PID;
   }
 
   return current_mode_;
@@ -134,8 +170,8 @@ SupervisorOutput ControllerSupervisor::update(const PreviewMetrics& metrics,
 
 void ControllerSupervisor::reset()
 {
-  current_mode_ = ControllerMode::Stanley;
-  previous_mode_ = ControllerMode::Stanley;
+  current_mode_ = ControllerMode::PID;
+  previous_mode_ = ControllerMode::PID;
   initialized_ = false;
   last_mode_change_time_ = 0.0;
 }

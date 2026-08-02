@@ -104,7 +104,7 @@ TEST(ControllerSupervisor, TransitionProgressRampsFromZeroToOne)
   EXPECT_NEAR(settled.transition_progress, 1.0, 1e-9);
 }
 
-TEST(ControllerSupervisor, ResetReturnsToInitialStanleyState)
+TEST(ControllerSupervisor, ResetReturnsToInitialPidState)
 {
   const SupervisorConfig config;
   ControllerSupervisor supervisor(config);
@@ -113,12 +113,41 @@ TEST(ControllerSupervisor, ResetReturnsToInitialStanleyState)
   ASSERT_EQ(supervisor.currentMode(), ControllerMode::MPC);
 
   supervisor.reset();
-  EXPECT_EQ(supervisor.currentMode(), ControllerMode::Stanley);
+  EXPECT_EQ(supervisor.currentMode(), ControllerMode::PID);
 
   // After reset, the next update re-initializes without dwell delay.
   const SupervisorOutput reinit = supervisor.update(makeMetrics(0.02), 5.0, 0.0, 100.0);
   EXPECT_EQ(reinit.selected_controller, ControllerMode::MPC);
   EXPECT_FALSE(reinit.controller_changed);
+}
+
+TEST(ControllerSupervisor, PidIsSelectedOnEssentiallyStraightPath)
+{
+  const SupervisorConfig config;  // stanley_enter_curvature_threshold defaults to 0.0008
+  ControllerSupervisor supervisor(config);
+
+  const SupervisorOutput output = supervisor.update(makeMetrics(0.0001), 5.0, 0.0, 0.0);
+  EXPECT_EQ(output.selected_controller, ControllerMode::PID);
+}
+
+TEST(ControllerSupervisor, HysteresisPreventsOscillationAroundPidStanleyThreshold)
+{
+  const SupervisorConfig config;  // stanley_enter=0.0008, stanley_exit=0.0004
+  ControllerSupervisor supervisor(config);
+
+  const SupervisorOutput init = supervisor.update(makeMetrics(0.0001), 5.0, 0.0, 0.0);
+  ASSERT_EQ(init.selected_controller, ControllerMode::PID);
+
+  // Crosses stanley_enter_curvature_threshold: escalate to Stanley.
+  const SupervisorOutput escalate = supervisor.update(makeMetrics(0.0009), 5.0, 0.0, 0.1);
+  EXPECT_EQ(escalate.selected_controller, ControllerMode::Stanley);
+  EXPECT_TRUE(escalate.controller_changed);
+
+  // Drops below stanley_enter but stays above stanley_exit (0.0004):
+  // hysteresis keeps Stanley active rather than dropping back to PID.
+  const SupervisorOutput hold = supervisor.update(makeMetrics(0.0006), 5.0, 0.0, 1.2);
+  EXPECT_EQ(hold.selected_controller, ControllerMode::Stanley);
+  EXPECT_FALSE(hold.controller_changed);
 }
 
 TEST(PathCurvatureSupervisorPreview, SelectsMpcBeforeReachingUpcomingSharpCurve)

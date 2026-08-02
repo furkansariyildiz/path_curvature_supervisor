@@ -41,11 +41,19 @@ struct SupervisorConfig
   double mpc_lateral_acceleration_enter_threshold{1.5};
   double mpc_lateral_acceleration_exit_threshold{1.0};
 
+  // Enter/exit thresholds for the bottom tier transition, PID <-> Stanley.
+  // PID here is a bare heading-error regulator with no cross-track-error
+  // correction (see ControllerMode), so it should only be active on
+  // essentially straight path segments -- these defaults are intentionally
+  // much smaller than pure_pursuit_enter/exit_curvature_threshold.
+  double stanley_enter_curvature_threshold{0.0008};
+  double stanley_exit_curvature_threshold{0.0004};
+
   // Fraction (0-1] of `mpc_enter_curvature_threshold` that the *average*
   // preview curvature must also reach before a curvature-based upgrade is
   // confirmed. Guards against a single noisy curvature spike (already rare
   // after smoothing) triggering an unnecessary escalation. See README.md
-  // section "Preview curvature analizi".
+  // section "Preview curvature analysis".
   double average_curvature_confirmation_ratio{0.4};
 
   // --- Preview distance -------------------------------------------------
@@ -81,7 +89,7 @@ struct SupervisorConfig
   // --- Nearest-point search ----------------------------------------------
   // 0 = unbounded linear search over the whole path. > 0 = only search
   // within +/- this many resampled points of the last known index. See
-  // README.md section "Performans".
+  // README.md section "Performance".
   std::size_t nearest_point_search_window{0};
 
   void validate() const
@@ -99,6 +107,11 @@ struct SupervisorConfig
     requireNonNegative(mpc_enter_curvature_threshold, "mpc_enter_curvature_threshold");
     requireOrdered(mpc_exit_curvature_threshold, mpc_enter_curvature_threshold,
                    "mpc_exit_curvature_threshold", "mpc_enter_curvature_threshold");
+
+    requireNonNegative(stanley_exit_curvature_threshold, "stanley_exit_curvature_threshold");
+    requireNonNegative(stanley_enter_curvature_threshold, "stanley_enter_curvature_threshold");
+    requireOrdered(stanley_exit_curvature_threshold, stanley_enter_curvature_threshold,
+                   "stanley_exit_curvature_threshold", "stanley_enter_curvature_threshold");
 
     requireNonNegative(pure_pursuit_exit_curvature_threshold, "pure_pursuit_exit_curvature_threshold");
     requireNonNegative(pure_pursuit_enter_curvature_threshold, "pure_pursuit_enter_curvature_threshold");

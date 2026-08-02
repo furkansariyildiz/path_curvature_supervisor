@@ -43,8 +43,12 @@ struct CurveRegion
   CurvatureZone zone{CurvatureZone::Straight};
 };
 
+// Ordered from least to most capable/demanding, see ControllerSupervisor::tierOf().
+// PID is a bare heading-error regulator with no cross-track-error correction,
+// so it is only ever selected for near-straight path segments.
 enum class ControllerMode
 {
+  PID,
   Stanley,
   PurePursuit,
   MPC
@@ -64,8 +68,8 @@ enum class CurvatureSmoothingMode
 
 struct SupervisorOutput
 {
-  ControllerMode selected_controller{ControllerMode::Stanley};
-  ControllerMode previous_controller{ControllerMode::Stanley};
+  ControllerMode selected_controller{ControllerMode::PID};
+  ControllerMode previous_controller{ControllerMode::PID};
 
   double current_arc_length{0.0};
   double preview_distance{0.0};
@@ -114,6 +118,8 @@ inline std::string toString(ControllerMode mode)
 {
   switch (mode)
   {
+    case ControllerMode::PID:
+      return "PID";
     case ControllerMode::Stanley:
       return "Stanley";
     case ControllerMode::PurePursuit:

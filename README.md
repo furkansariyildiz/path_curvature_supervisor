@@ -2,9 +2,10 @@
 
 A reusable, framework-agnostic C++17 library that analyzes the curvature of
 a known global path ahead of time and helps an autonomous-vehicle stack
-choose which lateral controller (Stanley, Pure Pursuit, MPC) should be
-active at each point along the drive, with hysteresis and dwell-time
-guards so the choice is stable in closed-loop operation.
+choose which lateral controller (PID, Stanley, Pure Pursuit, MPC, from least
+to most capable) should be active at each point along the drive, with
+hysteresis and dwell-time guards so the choice is stable in closed-loop
+operation.
 
 **The library code has no ROS / ROS2 dependency** -- no ROS headers, no
 ROS message types, no `roscpp`/`rclcpp` API usage anywhere under
@@ -149,12 +150,22 @@ MPC selection, not an average that could mask a single sharp apex.
 
 Every enter/exit pair (`mpc_enter`/`mpc_exit_curvature_threshold`,
 `pure_pursuit_enter`/`exit_curvature_threshold`,
+`stanley_enter`/`exit_curvature_threshold`,
 `mpc_lateral_acceleration_enter`/`exit_threshold`) is intentionally
 asymmetric (enter threshold > exit threshold). `ControllerSupervisor`
 evaluates enter/exit conditions relative to the *current* mode (see the
 `switch` in `decideTargetMode`), so a value oscillating between the enter
 and exit thresholds does not cause the controller to flip back and forth
--- see `ControllerSupervisor.HysteresisPreventsOscillationAroundMpcThreshold`.
+-- see `ControllerSupervisor.HysteresisPreventsOscillationAroundMpcThreshold`
+and `ControllerSupervisor.HysteresisPreventsOscillationAroundPidStanleyThreshold`.
+
+**Why PID is its own bottom tier:** `ControllerMode::PID` maps to a bare
+heading-error regulator (bearing-to-target-point vs. current yaw) with no
+cross-track-error correction at all, unlike Stanley/Pure Pursuit/MPC. It
+will systematically cut corners on any real curve, so `stanley_enter_curvature_threshold`
+and `stanley_exit_curvature_threshold` default much smaller than the
+Pure Pursuit pair -- PID is only ever the target on path segments that are
+essentially perfectly straight.
 
 **Guarding against a single curvature spike:** a curvature-based upgrade
 additionally requires the *average* preview curvature to reach
@@ -173,7 +184,7 @@ speed can be just as dangerous as a sharp curvature at low speed
 
 Once a controller has been active, it must stay active for at least
 `minimum_controller_dwell_time` seconds before switching to a **lower**
-tier (MPC > Pure Pursuit > Stanley), to avoid rapid, physically
+tier (MPC > Pure Pursuit > Stanley > PID), to avoid rapid, physically
 unrealistic controller thrashing. A switch to a **higher** tier is, by
 default (`bypass_dwell_time_for_upgrade = true`), allowed to happen
 immediately: if the path ahead suddenly demands a more capable/cautious
@@ -234,7 +245,7 @@ threshold pairs.
 | `curvature_method` | `ThreePoint` (default) or `HeadingDerivative`. |
 | `curvature_smoothing_mode` | `SignedMovingAverage` (default) or `Median`. |
 | `straight_curvature_threshold`, `sharp_curvature_threshold` | Per-point zone classification bounds. |
-| `mpc_enter/exit_curvature_threshold`, `pure_pursuit_enter/exit_curvature_threshold` | Hysteresis thresholds on preview max curvature. |
+| `mpc_enter/exit_curvature_threshold`, `pure_pursuit_enter/exit_curvature_threshold`, `stanley_enter/exit_curvature_threshold` | Hysteresis thresholds on preview max curvature. |
 | `mpc_lateral_acceleration_enter/exit_threshold` | Hysteresis thresholds on `v^2*kappa`. |
 | `average_curvature_confirmation_ratio` | Spike-rejection ratio, see section 9. |
 | `minimum_preview_distance`, `maximum_preview_distance`, `preview_time` | Preview distance formula, section 7. |
