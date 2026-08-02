@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>path_curvature_supervisor</name>
+  <version>0.0.1</version>
+  <description>Framework-agnostic C++17 library that analyzes global path curvature and selects a lateral controller mode (Stanley, Pure Pursuit, MPC) with hysteresis and dwell-time guards. The library itself has no ROS dependency; it is packaged as a catkin package for build-system integration only.</description>
+
+  <maintainer email="furkan.sariyildiz@adastec.com">furkan</maintainer>
+  <license>TODO</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <test_depend>gtest</test_depend>
+
+  <export>
+  </export>
+</package>
