@@ -339,6 +339,41 @@ const SupervisorOutput output = supervisor.update(nearest_index, vehicle_velocit
 std::cout << toString(output.selected_controller) << '\n';
 ```
 
+### Optional: live lane monitor (ROS/Autoware developer tool)
+
+`scripts/live_lane_monitor.py` is an optional Python/rospy tool, installed
+via `catkin_install_python`, for visually inspecting what
+`ros_controllers`' `path_curvature_supervisor_` instance is actually
+deciding against a real lane. It has no effect on, and is not required by,
+the C++ library above -- the library stays ROS-free; this script is purely
+a convenience for this deployment.
+
+It subscribes to:
+
+- `/planning/motion_planning/optimized_trajectory` (`autoware_planning_msgs/Trajectory`) -- lane geometry only, used to draw the path.
+- `/path_curvature_supervisor/curve_regions` (latched) -- the curve regions detected for the current path.
+- `/path_curvature_supervisor/debug` -- the latest `SupervisorOutput`, one message per control-loop cycle.
+
+Both `/path_curvature_supervisor/*` topics are published by
+`ros_controllers`' `MainNode` (`trajectoryCallback()` and
+`refreshPlanningCache()`), encoding the real `CurveRegion` list and
+`SupervisorOutput` as flat `autoware_debug_msgs/Float32MultiArrayStamped`
+arrays -- see the wire-format comments at the top of
+`scripts/live_lane_monitor.py` and next to the corresponding publishers in
+`ros_controllers/include/ros_controllers/main_node.hpp`. The script does
+**not** re-implement any curvature or controller-selection logic itself;
+it only renders what the C++ library already decided.
+
+It draws the lane colored by curvature zone (green/orange/red for
+Straight/ModerateCurve/SharpCurve), highlights the vehicle's current
+preview window on top of that, and prints the selected controller, the
+zone under the vehicle, and the preview metrics -- both live on the plot
+and to the console whenever the selected controller changes.
+
+```bash
+rosrun path_curvature_supervisor live_lane_monitor.py
+```
+
 ## 16. Known limitations
 
 - **Nearest-point search is linear**, optionally windowed around the last

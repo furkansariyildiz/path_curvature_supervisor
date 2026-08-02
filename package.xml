@@ -11,6 +11,13 @@
 
   <test_depend>gtest</test_depend>
 
+  <!-- Runtime-only dependencies of scripts/live_lane_monitor.py, an optional
+       ROS/Autoware-specific developer tool. Not required to build or use
+       the C++ library, which remains ROS-free. -->
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>autoware_planning_msgs</exec_depend>
+  <exec_depend>autoware_debug_msgs</exec_depend>
+
   <export>
   </export>
 </package>

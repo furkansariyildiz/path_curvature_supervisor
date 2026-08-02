@@ -47,6 +47,15 @@ install(DIRECTORY include/${PROJECT_NAME}/
   FILES_MATCHING PATTERN "*.hpp"
 )
 
+# Optional ROS/Autoware-specific developer tool. It has no bearing on the
+# C++ library above (which stays ROS-free); it just visualizes what
+# ros_controllers' path_curvature_supervisor_ instance actually decided,
+# via the /path_curvature_supervisor/* topics it publishes.
+catkin_install_python(PROGRAMS
+  scripts/live_lane_monitor.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
 if(CATKIN_ENABLE_TESTING)
   catkin_add_gtest(${PROJECT_NAME}_tests
     tests/test_main.cpp
