@@ -89,6 +89,14 @@ class LiveLaneMonitor:
         self.transition_progress = 1.0
 
         self._last_logged_controller = None
+        # The overview should behave like a fixed kroki (schematic map), not a
+        # camera that keeps re-centering -- only refit when the path's extent
+        # actually grows beyond what is currently framed (e.g. a real reroute),
+        # not every time the same route is re-published with a new speed
+        # profile. `_view_xlim`/`_view_ylim` are the bounds last fitted to.
+        self._path_view_dirty = False
+        self._view_xlim = None
+        self._view_ylim = None
 
         rospy.Subscriber(
             "/planning/motion_planning/optimized_trajectory", Trajectory, self.trajectory_callback
@@ -123,6 +131,27 @@ class LiveLaneMonitor:
             self.path_x = xs
             self.path_y = ys
             self.path_arc_length = cumulative_arc_length(xs, ys)
+            if self._path_outgrows_current_view(xs, ys):
+                self._path_view_dirty = True
+
+    def _path_outgrows_current_view(self, path_x, path_y):
+        """True on the first path, or if it now reaches outside the last
+        fitted view (e.g. a real reroute) -- not on every re-publish of the
+        same route, so the overview stays a stable kroki instead of jittering."""
+        if self._view_xlim is None or self._view_ylim is None:
+            return True
+
+        x_min, x_max = float(np.min(path_x)), float(np.max(path_x))
+        y_min, y_max = float(np.min(path_y)), float(np.max(path_y))
+        view_x_min, view_x_max = self._view_xlim
+        view_y_min, view_y_max = self._view_ylim
+
+        return (
+            x_min < view_x_min
+            or x_max > view_x_max
+            or y_min < view_y_min
+            or y_max > view_y_max
+        )
 
     def regions_callback(self, msg):
         data = msg.data
@@ -245,6 +274,31 @@ class LiveLaneMonitor:
             )
             self.region_lines.append(line)
 
+    def _fit_view_to_path(self, path_x, path_y, padding_fraction=0.12):
+        """Frame the whole path with a comfortable margin, zoomed out enough
+        that the entire map is visible rather than tracking the vehicle."""
+        if len(path_x) == 0:
+            return
+
+        x_min, x_max = float(np.min(path_x)), float(np.max(path_x))
+        y_min, y_max = float(np.min(path_y)), float(np.max(path_y))
+        x_center = 0.5 * (x_min + x_max)
+        y_center = 0.5 * (y_min + y_max)
+
+        # A single shared half-span (rather than independent x/y ranges) keeps
+        # the equal-aspect view a clean, centered square around the whole path.
+        span = max(x_max - x_min, y_max - y_min, 1.0)
+        half_span = 0.5 * span * (1.0 + 2.0 * padding_fraction)
+
+        new_xlim = (x_center - half_span, x_center + half_span)
+        new_ylim = (y_center - half_span, y_center + half_span)
+        self.ax_path.set_xlim(*new_xlim)
+        self.ax_path.set_ylim(*new_ylim)
+
+        with self.data_lock:
+            self._view_xlim = new_xlim
+            self._view_ylim = new_ylim
+
     def update_plot(self, _frame):
         with self.data_lock:
             if len(self.path_x) == 0:
@@ -262,6 +316,8 @@ class LiveLaneMonitor:
             controller_changed = self.controller_changed
             transition_progress = self.transition_progress
             regions = list(self.regions)
+            view_dirty = self._path_view_dirty
+            self._path_view_dirty = False
 
         self.line_path_base.set_data(path_x, path_y)
         self._rebuild_region_lines(path_x, path_y, path_arc_length, regions)
@@ -275,8 +331,8 @@ class LiveLaneMonitor:
         )
         self.marker_vehicle.set_data([path_x[start_index]], [path_y[start_index]])
 
-        self.ax_path.relim()
-        self.ax_path.autoscale_view()
+        if view_dirty:
+            self._fit_view_to_path(path_x, path_y)
 
         zone_here = self._zone_at(current_arc_length, regions)
         lines = [
